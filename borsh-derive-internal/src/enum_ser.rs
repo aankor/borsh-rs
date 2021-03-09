@@ -2,9 +2,9 @@ use core::convert::TryFrom;
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{Fields, Ident, ItemEnum, WhereClause};
+use syn::{Fields, Ident, ItemEnum, Path, WhereClause};
 
-use crate::attribute_helpers::contains_skip;
+use crate::attribute_helpers::{contains_serialize_with, contains_skip};
 
 pub fn enum_ser(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2> {
     let name = &input.ident;
@@ -26,21 +26,29 @@ pub fn enum_ser(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2>
             Fields::Named(fields) => {
                 for field in &fields.named {
                     let field_name = field.ident.as_ref().unwrap();
+
+                    let serialize_with = contains_serialize_with(&field.attrs)?;
+                    let serializer: Path = serialize_with
+                        .clone()
+                        .unwrap_or(syn::parse_quote! { #cratename::BorshSerialize::serialize });
+
                     if contains_skip(&field.attrs) {
                         variant_header.extend(quote! { _#field_name, });
                         continue;
                     } else {
-                        let field_type = &field.ty;
-                        where_clause.predicates.push(
-                            syn::parse2(quote! {
-                                #field_type: #cratename::ser::BorshSerialize
-                            })
-                            .unwrap(),
-                        );
+                        if serialize_with.is_none() {
+                            let field_type = &field.ty;
+                            where_clause.predicates.push(
+                                syn::parse2(quote! {
+                                    #field_type: #cratename::ser::BorshSerialize
+                                })
+                                .unwrap(),
+                            );
+                        }
                         variant_header.extend(quote! { #field_name, });
                     }
                     variant_body.extend(quote! {
-                         #cratename::BorshSerialize::serialize(#field_name, writer)?;
+                         #serializer(#field_name, writer)?;
                     })
                 }
                 variant_header = quote! { { #variant_header }};
@@ -49,25 +57,33 @@ pub fn enum_ser(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2>
                 for (field_idx, field) in fields.unnamed.iter().enumerate() {
                     let field_idx =
                         u32::try_from(field_idx).expect("up to 2^32 fields are supported");
+
+                    let serialize_with = contains_serialize_with(&field.attrs)?;
+                    let serializer: Path = serialize_with
+                        .clone()
+                        .unwrap_or(syn::parse_quote! { #cratename::BorshSerialize::serialize });
+
                     if contains_skip(&field.attrs) {
                         let field_ident =
                             Ident::new(format!("_id{}", field_idx).as_str(), Span::call_site());
                         variant_header.extend(quote! { #field_ident, });
                         continue;
                     } else {
-                        let field_type = &field.ty;
-                        where_clause.predicates.push(
-                            syn::parse2(quote! {
-                                #field_type: #cratename::ser::BorshSerialize
-                            })
-                            .unwrap(),
-                        );
+                        if serialize_with.is_none() {
+                            let field_type = &field.ty;
+                            where_clause.predicates.push(
+                                syn::parse2(quote! {
+                                    #field_type: #cratename::ser::BorshSerialize
+                                })
+                                .unwrap(),
+                            );
+                        }
 
                         let field_ident =
                             Ident::new(format!("id{}", field_idx).as_str(), Span::call_site());
                         variant_header.extend(quote! { #field_ident, });
                         variant_body.extend(quote! {
-                            #cratename::BorshSerialize::serialize(#field_ident, writer)?;
+                            #serializer(#field_ident, writer)?;
                         })
                     }
                 }

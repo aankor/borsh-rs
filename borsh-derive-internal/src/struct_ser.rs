@@ -2,9 +2,9 @@ use core::convert::TryFrom;
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{Fields, Ident, Index, ItemStruct, WhereClause};
+use syn::{Fields, Ident, Index, ItemStruct, Path, WhereClause};
 
-use crate::attribute_helpers::contains_skip;
+use crate::attribute_helpers::{contains_serialize_with, contains_skip};
 
 pub fn struct_ser(input: &ItemStruct, cratename: Ident) -> syn::Result<TokenStream2> {
     let name = &input.ident;
@@ -24,30 +24,53 @@ pub fn struct_ser(input: &ItemStruct, cratename: Ident) -> syn::Result<TokenStre
                     continue;
                 }
                 let field_name = field.ident.as_ref().unwrap();
+                let serialize_with = contains_serialize_with(&field.attrs)?;
+                let serializer: Path = serialize_with
+                    .clone()
+                    .unwrap_or(syn::parse_quote! { #cratename::BorshSerialize::serialize });
                 let delta = quote! {
-                    #cratename::BorshSerialize::serialize(&self.#field_name, writer)?;
+                    #serializer(&self.#field_name, writer)?;
                 };
                 body.extend(delta);
 
-                let field_type = &field.ty;
-                where_clause.predicates.push(
-                    syn::parse2(quote! {
-                        #field_type: #cratename::ser::BorshSerialize
-                    })
-                    .unwrap(),
-                );
+                if serialize_with.is_none() {
+                    let field_type = &field.ty;
+                    where_clause.predicates.push(
+                        syn::parse2(quote! {
+                            #field_type: #cratename::ser::BorshSerialize
+                        })
+                        .unwrap(),
+                    );
+                }
             }
         }
         Fields::Unnamed(fields) => {
-            for field_idx in 0..fields.unnamed.len() {
+            for (field_idx, field) in fields.unnamed.iter().enumerate() {
                 let field_idx = Index {
                     index: u32::try_from(field_idx).expect("up to 2^32 fields are supported"),
                     span: Span::call_site(),
                 };
+
+                let serialize_with = contains_serialize_with(&field.attrs)?;
+                let serializer: Path = serialize_with
+                    .clone()
+                    .unwrap_or(syn::parse_quote! { #cratename::BorshSerialize::serialize });
+
                 let delta = quote! {
-                    #cratename::BorshSerialize::serialize(&self.#field_idx, writer)?;
+                    #serializer(&self.#field_idx, writer)?;
                 };
                 body.extend(delta);
+                /* TODO:
+                if serialize_with.is_none() {
+                    let field_type = &field.ty;
+                    where_clause.predicates.push(
+                        syn::parse2(quote! {
+                            #field_type: #cratename::ser::BorshSerialize
+                        })
+                        .unwrap(),
+                    );
+                }
+                */
             }
         }
         Fields::Unit => {}

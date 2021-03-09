@@ -1,8 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Fields, Ident, ItemStruct, WhereClause};
+use syn::{Fields, Ident, ItemStruct, Path, WhereClause};
 
-use crate::attribute_helpers::{contains_initialize_with, contains_skip};
+use crate::attribute_helpers::{
+    contains_deserialize_with, contains_initialize_with, contains_skip,
+};
 
 pub fn struct_de(input: &ItemStruct, cratename: Ident) -> syn::Result<TokenStream2> {
     let name = &input.ident;
@@ -25,16 +27,23 @@ pub fn struct_de(input: &ItemStruct, cratename: Ident) -> syn::Result<TokenStrea
                         #field_name: Default::default(),
                     }
                 } else {
-                    let field_type = &field.ty;
-                    where_clause.predicates.push(
-                        syn::parse2(quote! {
-                            #field_type: #cratename::BorshDeserialize
-                        })
-                        .unwrap(),
-                    );
+                    let deserialize_with = contains_deserialize_with(&field.attrs)?;
+                    let deserializer: Path = deserialize_with
+                        .clone()
+                        .unwrap_or(syn::parse_quote! { #cratename::BorshDeserialize::deserialize });
+
+                    if deserialize_with.is_none() {
+                        let field_type = &field.ty;
+                        where_clause.predicates.push(
+                            syn::parse2(quote! {
+                                #field_type: #cratename::BorshDeserialize
+                            })
+                            .unwrap(),
+                        );
+                    }
 
                     quote! {
-                        #field_name: #cratename::BorshDeserialize::deserialize(buf)?,
+                        #field_name: #deserializer(buf)?,
                     }
                 };
                 body.extend(delta);
@@ -45,9 +54,13 @@ pub fn struct_de(input: &ItemStruct, cratename: Ident) -> syn::Result<TokenStrea
         }
         Fields::Unnamed(fields) => {
             let mut body = TokenStream2::new();
-            for _ in 0..fields.unnamed.len() {
+            for field in fields.unnamed.iter() {
+                let deserialize_with = contains_deserialize_with(&field.attrs)?;
+                let deserializer: Path = deserialize_with
+                    .unwrap_or(syn::parse_quote! { #cratename::BorshDeserialize::deserialize });
+
                 let delta = quote! {
-                    #cratename::BorshDeserialize::deserialize(buf)?,
+                    #deserializer(buf)?,
                 };
                 body.extend(delta);
             }

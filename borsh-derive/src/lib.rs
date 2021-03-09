@@ -7,7 +7,7 @@ use syn::{Ident, ItemEnum, ItemStruct, ItemUnion};
 use borsh_derive_internal::*;
 use borsh_schema_derive_internal::*;
 
-#[proc_macro_derive(BorshSerialize, attributes(borsh_skip))]
+#[proc_macro_derive(BorshSerialize, attributes(borsh_skip, borsh_serialize_with))]
 pub fn borsh_serialize(input: TokenStream) -> TokenStream {
     let cratename = Ident::new(
         &crate_name("borsh").unwrap_or("borsh".to_string()),
@@ -30,7 +30,10 @@ pub fn borsh_serialize(input: TokenStream) -> TokenStream {
     })
 }
 
-#[proc_macro_derive(BorshDeserialize, attributes(borsh_skip, borsh_init))]
+#[proc_macro_derive(
+    BorshDeserialize,
+    attributes(borsh_skip, borsh_init, borsh_deserialize_with)
+)]
 pub fn borsh_deserialize(input: TokenStream) -> TokenStream {
     let cratename = Ident::new(
         &crate_name("borsh").unwrap_or("borsh".to_string()),

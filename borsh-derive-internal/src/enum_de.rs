@@ -2,9 +2,11 @@ use core::convert::TryFrom;
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Fields, Ident, ItemEnum, WhereClause};
+use syn::{Fields, Ident, ItemEnum, Path, WhereClause};
 
-use crate::attribute_helpers::{contains_initialize_with, contains_skip};
+use crate::attribute_helpers::{
+    contains_deserialize_with, contains_initialize_with, contains_skip,
+};
 
 pub fn enum_de(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2> {
     let name = &input.ident;
@@ -31,16 +33,23 @@ pub fn enum_de(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2> 
                             #field_name: Default::default(),
                         });
                     } else {
-                        let field_type = &field.ty;
-                        where_clause.predicates.push(
-                            syn::parse2(quote! {
-                                #field_type: #cratename::BorshDeserialize
-                            })
-                            .unwrap(),
+                        let deserialize_with = contains_deserialize_with(&field.attrs)?;
+                        let deserializer: Path = deserialize_with.clone().unwrap_or(
+                            syn::parse_quote! { #cratename::BorshDeserialize::deserialize },
                         );
 
+                        if deserialize_with.is_none() {
+                            let field_type = &field.ty;
+                            where_clause.predicates.push(
+                                syn::parse2(quote! {
+                                    #field_type: #cratename::BorshDeserialize
+                                })
+                                .unwrap(),
+                            );
+                        }
+
                         variant_header.extend(quote! {
-                            #field_name: #cratename::BorshDeserialize::deserialize(buf)?,
+                            #field_name: #deserializer(buf)?,
                         });
                     }
                 }
@@ -51,16 +60,22 @@ pub fn enum_de(input: &ItemEnum, cratename: Ident) -> syn::Result<TokenStream2> 
                     if contains_skip(&field.attrs) {
                         variant_header.extend(quote! { Default::default(), });
                     } else {
-                        let field_type = &field.ty;
-                        where_clause.predicates.push(
-                            syn::parse2(quote! {
-                                #field_type: #cratename::BorshDeserialize
-                            })
-                            .unwrap(),
+                        let deserialize_with = contains_deserialize_with(&field.attrs)?;
+                        let deserializer: Path = deserialize_with.clone().unwrap_or(
+                            syn::parse_quote! { #cratename::BorshDeserialize::deserialize },
                         );
 
-                        variant_header
-                            .extend(quote! { #cratename::BorshDeserialize::deserialize(buf)?, });
+                        if deserialize_with.is_none() {
+                            let field_type = &field.ty;
+                            where_clause.predicates.push(
+                                syn::parse2(quote! {
+                                    #field_type: #cratename::BorshDeserialize
+                                })
+                                .unwrap(),
+                            );
+                        }
+
+                        variant_header.extend(quote! { #deserializer(buf)?, });
                     }
                 }
                 variant_header = quote! { ( #variant_header )};
